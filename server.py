@@ -17,10 +17,47 @@ import sys
 import socket
 from _thread import *
 import threading
+import uuid
+import os
 
 sensor_index_lock = threading.Lock()
 
 current_index=0
+
+class Server():
+	def __init__(self):
+		self_connection = sqlite3.connect("self_sensor_data.db")
+		table_command = """
+		SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+		"""
+		cursor =self_connection.cursor()
+		cursor.execute(table_command)
+		table_row = cursor.fetchone()
+		f = open("id_file.txt", "w")
+		if os.stat("id_file.txt") == 0 and table_row == None:
+			self.id = uuid.uuid4()
+			f.write(str(id) + "\n")
+			create_initial_table(self.id)
+
+		elif os.stat("id_file.txt") != 0 and table_row == None:
+			self.id = f.readline()
+			create_initial_table(self.id)
+		else:
+			table_command = """
+			SELECT name FROM sqlite_master WHERE type='table'
+			"""
+			cursor.execute(table_command)
+			table_row = cursor.fetchone()
+			self.id = table_row.split("_")[2]
+
+		self_connection.commit()
+		self_connection.close()
+
+
+
+
+
+
 
 def get_sensor_index():
 	global current_index
@@ -30,10 +67,10 @@ def get_sensor_index():
 	sensor_index_lock.release()
 	return ret_index
 
-def create_initial_table():
+def create_initial_table(id):
 	self_connection = sqlite3.connect("self_sensor_data.db")
 	create_table_command = """
-	CREATE TABLE server_id_12312313 (
+	CREATE TABLE server_id_%s""" %str(id) + """ (
 		entry_index INTEGER PRIMARY KEY,
 		sensor_index INTEGER,
 		sensor_type VARCHAR(40),
@@ -46,12 +83,14 @@ def create_initial_table():
 	self_connection.close()
 
 
-def check_if_self_table_exists():
+
+
+def check_if_self_table_exists(id):
 	self_connection = sqlite3.connect("self_sensor_data.db")
 	show_table_command = """
 		SELECT name FROM sqlite_master WHERE type='table'
-		AND name='server_id_12312313'
-	"""
+		AND name= 'server_id_%s'""" % str(id)
+
 	cursor = self_connection.cursor()
 	cursor.execute(show_table_command)
 	table_row = cursor.fetchone()
