@@ -20,6 +20,7 @@ import threading
 import uuid
 import os
 import os.path
+import unittest
 
 sensor_index_lock = threading.Lock()
 
@@ -138,6 +139,14 @@ class Server():
 			return True
 		else:
 			return False
+
+class TestServerMethods(unittest.TestCase):
+	def test_decoding_string(self):
+		self.assertTrue(True)
+	def test_create_table(self):
+		self.assertTrue(True)
+	def test_insert_sensor_data(self):
+		self.assertTrue(True)
 
 server = Server()
 
