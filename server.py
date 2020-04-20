@@ -19,45 +19,127 @@ from _thread import *
 import threading
 import uuid
 import os
+import os.path
 
 sensor_index_lock = threading.Lock()
 
 current_index=0
+NoneType = type(None)
+
 
 class Server():
+	server_id = 0
 	def __init__(self):
-		self_connection = sqlite3.connect("self_sensor_data.db")
+		self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
 		table_command = """
 		SELECT COUNT(*) FROM sqlite_master WHERE type='table'
 		"""
 		cursor =self_connection.cursor()
 		cursor.execute(table_command)
 		table_row = cursor.fetchone()
-		f = open("id_file.txt", "w")
-		if os.stat("id_file.txt") == 0 and table_row == None:
-			self.id = uuid.uuid4()
-			f.write(str(id) + "\n")
-			create_initial_table(self.id)
 
-		elif os.stat("id_file.txt") != 0 and table_row == None:
-			self.id = f.readline()
-			create_initial_table(self.id)
+		if not isinstance(table_row, NoneType):
+			table_count = table_row[0]
 		else:
+			table_count = 0
+
+		f = open("id_file.txt", "r+")
+		if os.stat("id_file.txt").st_size != 0 and table_count == 0:
+			self.server_id = f.readline().rstrip()
+			create_initial_table(self.server_id)
+
+		elif not table_count == 0:
+			fileid = f.readline().rstrip()
 			table_command = """
 			SELECT name FROM sqlite_master WHERE type='table'
 			"""
 			cursor.execute(table_command)
 			table_row = cursor.fetchone()
-			self.id = table_row.split("_")[2]
+			tableid = table_row[0].split("_")[2]
+			if fileid != tableid:
+				print("id_file and table id differ, adopt table id")
+				f.truncate(0)
+				f.write(str(tableid) + "\n")
+				self.server_id=tableid
+			else:
+				self.server_id = tableid
+				print("id_file and table id match, do nothing")
+
+		elif os.stat("id_file.txt").st_size == 0 and table_count==0:
+			self.server_id = uuid.uuid4().hex
+			f.write(str(self.server_id) + "\n")
+			create_initial_table(self.server_id)
 
 		self_connection.commit()
 		self_connection.close()
 
 
+	def convert_sensor_dict_to_sql_command(self, sensor_dict):
+		sql_insert_command_str = '''
+			INSERT INTO server_id_%s VALUES
+			(NULL, %s, "%s", "%s %s", 0)
+		''' % (str(self.server_id),sensor_dict["index"],sensor_dict["sensor_type"],sensor_dict["sensor_data"],sensor_dict["timestamp"])
+		return sql_insert_command_str
+
+	def insert_sensor_data(self, sql_cmd):
+		self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
+		cursor = self_connection.cursor()
+		#print("SQL command: %s" %(sql_cmd))
+		cursor.execute(sql_cmd)
+		self_connection.commit()
+		self_connection.close()
+
+# returns a dict
+	def decode_sensor_reading_from_str(self, sensor_str, index):
+		sensor_reading_list=sensor_str.split(",")
+		sensor_data_dict = {"sensor_type":sensor_reading_list[0]}
+		sensor_data_dict.update({"sensor_data":sensor_reading_list[1]})
+		sensor_data_dict.update({"timestamp":sensor_reading_list[2]})
+		sensor_data_dict.update({"index":index})
+		return sensor_data_dict
+
+	def insert_sensor_str_to_table(self, sensor_str, index):
+		sensor_dict = self.decode_sensor_reading_from_str(sensor_str, index)
+		sql_insert_cmd = self.convert_sensor_dict_to_sql_command(sensor_dict)
+		self.insert_sensor_data(sql_insert_cmd)
 
 
 
 
+	def create_initial_table(self, id):
+		self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
+		create_table_command = """
+		CREATE TABLE server_id_%s (
+			entry_index INTEGER PRIMARY KEY,
+			sensor_index INTEGER,
+			sensor_type VARCHAR(40),
+			sensor_data VARCHAR(80),
+			data_checksum INTEGER);
+		""" % (str(id))
+		cursor = self_connection.cursor()
+		cursor.execute(create_table_command)
+		self_connection.commit()
+		self_connection.close()
+
+	def check_if_self_table_exists(self, id):
+		self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
+		show_table_command = """
+			SELECT name FROM sqlite_master WHERE type='table'
+			AND name= 'server_id_%s'""" % str(id)
+
+		cursor = self_connection.cursor()
+		cursor.execute(show_table_command)
+		table_row = cursor.fetchone()
+		self_connection.commit()
+		self_connection.close()
+
+		NoneType = type(None)
+		if not isinstance(table_row, NoneType):
+			return True
+		else:
+			return False
+
+server = Server()
 
 def get_sensor_index():
 	global current_index
@@ -67,85 +149,7 @@ def get_sensor_index():
 	sensor_index_lock.release()
 	return ret_index
 
-def create_initial_table(id):
-	self_connection = sqlite3.connect("self_sensor_data.db")
-	create_table_command = """
-	CREATE TABLE server_id_%s""" %str(id) + """ (
-		entry_index INTEGER PRIMARY KEY,
-		sensor_index INTEGER,
-		sensor_type VARCHAR(40),
-		sensor_data VARCHAR(80),
-		data_checksum INTEGER);
-	"""
-	cursor = self_connection.cursor()
-	cursor.execute(create_table_command)
-	self_connection.commit()
-	self_connection.close()
-
-
-
-
-def check_if_self_table_exists(id):
-	self_connection = sqlite3.connect("self_sensor_data.db")
-	show_table_command = """
-		SELECT name FROM sqlite_master WHERE type='table'
-		AND name= 'server_id_%s'""" % str(id)
-
-	cursor = self_connection.cursor()
-	cursor.execute(show_table_command)
-	table_row = cursor.fetchone()
-	self_connection.commit()
-	self_connection.close()
-
-	NoneType = type(None)
-	if not isinstance(table_row, NoneType):
-		return True
-	else:
-		return False
-
-
-def insert_bogus_sensor_data():
-	self_connection = sqlite3.connect("self_sensor_data.db")
-	insert_table_command = """
-	INSERT INTO server_id_12312313 VALUES
-	(NULL, 2, "Weather", "21C rain", 23232);
-	"""
-	cursor = self_connection.cursor()
-	cursor.execute(insert_table_command)
-	self_connection.commit()
-	self_connection.close()
-
-def convert_sensor_dict_to_sql_command(sensor_dict):
-	sql_insert_command_str = '''
-		INSERT INTO server_id_12312313 VALUES
-		(NULL, %s, "%s", "%s %s", 0)
-	''' % (sensor_dict["index"],sensor_dict["sensor_type"],sensor_dict["sensor_data"],sensor_dict["timestamp"])
-	return sql_insert_command_str
-
-def insert_self_sensor_data(sql_cmd):
-	self_connection = sqlite3.connect("self_sensor_data.db")
-	cursor = self_connection.cursor()
-	#print("SQL command: %s" %(sql_cmd))
-	cursor.execute(sql_cmd)
-	self_connection.commit()
-	self_connection.close()
-
-# returns a dict
-def decode_sensor_reading_from_str(sensor_str, index):
-	sensor_reading_list=sensor_str.split(",")
-	sensor_data_dict = {"sensor_type":sensor_reading_list[0]}
-	sensor_data_dict.update({"sensor_data":sensor_reading_list[1]})
-	sensor_data_dict.update({"timestamp":sensor_reading_list[2]})
-	sensor_data_dict.update({"index":index})
-	return sensor_data_dict
-
-def insert_sensor_str_to_table(sensor_str, index):
-	sensor_dict = decode_sensor_reading_from_str(sensor_str, index)
-	sql_insert_cmd = convert_sensor_dict_to_sql_command(sensor_dict)
-	insert_self_sensor_data(sql_insert_cmd)
-
-
-def sensor_rcv_thread(c):
+def sensor_rcv_thread(c, server):
 	# each new sensor thread receives a new index
 	my_index = get_sensor_index()
 	while True:
@@ -157,14 +161,12 @@ def sensor_rcv_thread(c):
 			break
 
 		sensor_str = str(data.decode('ascii'))
-		insert_sensor_str_to_table(sensor_str, my_index)
+		server.insert_sensor_str_to_table(sensor_str, my_index)
 		print("Received: %s" %(sensor_str))
 
 
 	# connection closed
 	c.close()
-
-
 
 # There needs to be two types of tables holding sensor data
 # "self" and "peer", these will be distinguished by being placed
@@ -175,16 +177,12 @@ def sensor_rcv_thread(c):
 
 def main():
 	print("In main")
-	# We first check if the database exists
-	if not check_if_self_table_exists():
-		print("Table does not exist, create it")
-		create_initial_table()
 
-	host = ""
 
 	# reverse a port on your computer
 	# in our case it is 12345 but it
 	# can be anything
+	host = ""
 	port = 12345
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	s.bind((host, port))
@@ -204,7 +202,7 @@ def main():
 		print('Connected to :', addr[0], ':', addr[1])
 
 		# Start a new thread and return its identifier
-		start_new_thread(sensor_rcv_thread, (c,))
+		start_new_thread(sensor_rcv_thread, (c, server))
 	s.close()
 
 
