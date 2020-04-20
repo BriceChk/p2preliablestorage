@@ -1,2 +1,78 @@
-#  p2preliablestorage
+#  p2preliablestorage: a simple implementation of a P2P protocol between servers sharing sensor data
+
+So far this is still in the Proof of Concept (PoC) phase.
+
+We have the following files:
+
+server.py
+sensor_simulator.py
+
+To start the server simply execute the server.py script:
+
+$ ./server.py
+
+In other terminals you can execute separate instances of the sensor_simulator.py script.
+Running this script without any parameters gives the following output:
+
+$ ./sensor_simulator.py
+You must specify the type of sensor data to simulate.
+Available options:
+--temp
+--pressure
+--humidity
+
+Using the "--temp" flag the simulator script will initiate a TCP connection to the server
+script and start sending each 2 second intervals some randomly generated temperature data:
+
+$ ./sensor_simulator.py --temp
+Sending Temperature,39C,2020-04-20 23:20:18.231325
+Sending Temperature,34C,2020-04-20 23:20:20.233264
+Sending Temperature,39C,2020-04-20 23:20:22.235523
+Sending Temperature,25C,2020-04-20 23:20:24.237794
+
+Using the "--pressure" flag the simulator script will initiate a TCP connection to the server
+script and start sending each 2 second intervals some randomly generated temperature data:
+
+$ ./sensor_simulator.py --pressure
+Sending Atm. Pressure,1.798 atm,2020-04-20 23:25:27.387164
+Sending Atm. Pressure,4.146 atm,2020-04-20 23:25:29.389375
+Sending Atm. Pressure,3.325 atm,2020-04-20 23:25:31.391742
+Sending Atm. Pressure,3.827 atm,2020-04-20 23:25:33.394127
+
+Using the "--humidity" flag the simulator script will initiate a TCP connection to the server
+script and start sending each 2 second intervals some randomly generated temperature data:
+
+$ ./sensor_simulator.py --humidity
+Sending Humidity,15% RH,2020-04-20 23:25:50.610889
+Sending Humidity,72% RH,2020-04-20 23:25:52.613108
+Sending Humidity,35% RH,2020-04-20 23:25:54.615362
+Sending Humidity,37% RH,2020-04-20 23:25:56.617709
+
+You can start multiple instances of this sensor_simulator.py script and server.py will receive
+and store the sensor data from all of them into the self_sensor_data.db database file.
+
+This database file is an sqlite3 database and it can be querried directly with the sqlite3 tool:
+
+sqlite> .tables
+server_id_b0fb648612d04a8c9ee69a218704abe0
+
+sqlite> select * from server_id_b0fb648612d04a8c9ee69a218704abe0;
+
+90|3|Temperature|39C 2020-04-20 23:20:18.231325|0
+91|3|Temperature|34C 2020-04-20 23:20:20.233264|0
+92|3|Temperature|39C 2020-04-20 23:20:22.235523|0
+93|3|Temperature|25C 2020-04-20 23:20:24.237794|0
+94|4|Atm. Pressure|1.798 atm 2020-04-20 23:25:27.387164|0
+95|4|Atm. Pressure|4.146 atm 2020-04-20 23:25:29.389375|0
+96|4|Atm. Pressure|3.325 atm 2020-04-20 23:25:31.391742|0
+97|4|Atm. Pressure|3.827 atm 2020-04-20 23:25:33.394127|0
+98|5|Humidity|15% RH 2020-04-20 23:25:50.610889|0
+99|5|Humidity|72% RH 2020-04-20 23:25:52.613108|0
+100|5|Humidity|35% RH 2020-04-20 23:25:54.615362|0
+101|5|Humidity|37% RH 2020-04-20 23:25:56.617709|0
+
+The next step is to implement the P2P protocol in which we have 2 instances of such servers,
+and they will share each other's sensor data and into "peer" tables, most probably into
+a different database file (or files). Before we do that we must implement data integrity
+checks so as to ensure that the data we send between the servers is not corrupted.
 
