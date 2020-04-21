@@ -47,7 +47,7 @@ class Server():
 		f = open("id_file.txt", "r+")
 		if os.stat("id_file.txt").st_size != 0 and table_count == 0:
 			self.server_id = f.readline().rstrip()
-			create_initial_table(self.server_id)
+			self.create_initial_table()
 
 		elif not table_count == 0:
 			fileid = f.readline().rstrip()
@@ -69,7 +69,7 @@ class Server():
 		elif os.stat("id_file.txt").st_size == 0 and table_count==0:
 			self.server_id = uuid.uuid4().hex
 			f.write(str(self.server_id) + "\n")
-			create_initial_table(self.server_id)
+			self.create_initial_table()
 
 		self_connection.commit()
 		self_connection.close()
@@ -104,10 +104,7 @@ class Server():
 		sql_insert_cmd = self.convert_sensor_dict_to_sql_command(sensor_dict)
 		self.insert_sensor_data(sql_insert_cmd)
 
-
-
-
-	def create_initial_table(self, id):
+	def create_initial_table(self):
 		self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
 		create_table_command = """
 		CREATE TABLE server_id_%s (
@@ -116,7 +113,7 @@ class Server():
 			sensor_type VARCHAR(40),
 			sensor_data VARCHAR(80),
 			data_checksum INTEGER);
-		""" % (str(id))
+		""" % (str(self.server_id))
 		cursor = self_connection.cursor()
 		cursor.execute(create_table_command)
 		self_connection.commit()
