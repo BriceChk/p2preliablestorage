@@ -26,7 +26,7 @@ sensor_index_lock = threading.Lock()
 
 current_index=0
 NoneType = type(None)
-
+server_status = "UP"
 
 class Server():
 	server_id = 0
@@ -174,6 +174,18 @@ def sensor_rcv_thread(c, server):
 	# connection closed
 	c.close()
 
+def controller_resp_thread():
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.bind(("", 8000))
+	s.listen(5)
+	while True:
+		c, addr = s.accept()
+		c.send(server_status.encode('ascii'))
+		c.close()
+		
+		
+
+
 # There needs to be two types of tables holding sensor data
 # "self" and "peer", these will be distinguished by being placed
 # in two separate database files
@@ -185,6 +197,8 @@ def main():
 	print("In main")
 
 
+	# start the controller thread
+	start_new_thread(controller_resp_thread, ())
 	# reverse a port on your computer
 	# in our case it is 12345 but it
 	# can be anything
