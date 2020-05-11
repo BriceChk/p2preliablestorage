@@ -27,7 +27,7 @@ sensor_index_lock = threading.Lock()
 
 current_index=0
 NoneType = type(None)
-server_status = "UP"
+server_status = "Running"
 
 class Server():
 	server_id = 0
@@ -298,7 +298,7 @@ def get_entire_self_db(first_index):
 	cursor = self_connection.cursor()
 	cursor.execute(table_command)
 	table = cursor.fetchall()
-	return table;
+	return table
 
 def format_table_entry_into_str(entry):
 	entry_str = "BEGIN/%d/%d/%s/%s/%d/END" % (entry[0], entry[1], entry[2], entry[3], entry[4])
