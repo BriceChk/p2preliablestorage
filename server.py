@@ -21,6 +21,7 @@ import uuid
 import os
 import os.path
 import unittest
+import time
 
 sensor_index_lock = threading.Lock()
 
@@ -71,9 +72,9 @@ class Server():
 			f.write(str(self.server_id) + "\n")
 			self.create_initial_table()
 
+		print("Self ID:", self.server_id)
 		self_connection.commit()
 		self_connection.close()
-
 
 	def convert_sensor_dict_to_sql_command(self, sensor_dict):
 		sql_insert_command_str = '''
@@ -174,6 +175,111 @@ def sensor_rcv_thread(c, server):
 	# connection closed
 	c.close()
 
+def create_peer_initial_table(peer_db):
+	peer_id = peer_db.split("_")[1][:-3] # get rid of ".db"
+	self_connection = sqlite3.connect(peer_db, timeout=40)
+	create_table_command = """
+	CREATE TABLE server_id_%s (
+		entry_index INTEGER PRIMARY KEY,
+		sensor_index INTEGER,
+		sensor_type VARCHAR(40),
+		sensor_data VARCHAR(80),
+		data_checksum INTEGER);
+	""" % (peer_id)
+	cursor = self_connection.cursor()
+	cursor.execute(create_table_command)
+	self_connection.commit()
+	self_connection.close()
+
+def insert_peer_sensor_data(peer_db, sql_cmd):
+	self_connection = sqlite3.connect(peer_db, timeout=40)
+	cursor = self_connection.cursor()
+	# If entry already exists, exception is thrown, ignore it
+	try:
+		cursor.execute(sql_cmd)
+	except sqlite3.IntegrityError as e:
+		pass
+	self_connection.commit()
+	self_connection.close()
+
+def check_if_peer_table_exists(peer_db):
+	self_connection = sqlite3.connect(peer_db, timeout=40)
+	table_command = """
+	SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+	"""
+	cursor =self_connection.cursor()
+	cursor.execute(table_command)
+	table_row = cursor.fetchone()
+
+	if not isinstance(table_row, NoneType):
+		table_count = table_row[0]
+	else:
+		table_count = 0
+	
+	print("Peer table count for",peer_db," is %d" %(table_count))
+
+	if table_count == 1:
+		return True
+	else:
+		return False
+
+
+def receive_or_sync_peer_db(c):
+	while True:
+		print("Listening for peer sync or identify message")
+		data = c.recv(1024)
+		if not data:
+			print("Connection to peer has been severed.")
+			break
+
+		id_str = str(data.decode('ascii'))
+
+		params = id_str.split("_")
+
+		msg_type = params[0]
+		if msg_type == "IDENTIFY":
+			peer_id = params[1]
+			print("Receive db info for peer", peer_id)
+
+			peer_db = "peer_%s.db" % (peer_id)
+			
+			print("Peer DB file: ", peer_db)
+
+			if check_if_peer_table_exists(peer_db) == False:
+				create_peer_initial_table(peer_db)
+
+			print("Received id for ", peer_id)
+
+			#TODO: if this is a SYNC, check if db with this ID exists
+			# if not just return ACK straight away.
+			c.send("ACK".encode("ascii"))
+
+			data = ''
+			while True:
+				data += c.recv(1024).decode('ascii')
+				if not data:
+					print("Connection to peer has been severed.")
+					break
+				elif data[-4:] == "DONE":
+					c.send("DONE".encode('ascii'))
+					break
+				
+			# This creates a list of peer sensor entries that we need to
+			# change to SQL query format
+			data = data.split("END")[:-1]
+			
+			for entry in data:
+				cur_entry = entry.strip("BEGIN").split("/")
+				sql_str = '''
+					INSERT INTO server_id_%s VALUES
+					(%s, %s, "%s", "%s", %s)
+					''' %(peer_id, cur_entry[1], cur_entry[2], cur_entry[3], cur_entry[4], cur_entry[5])
+				insert_peer_sensor_data(peer_db, sql_str)
+
+		elif msg_type == "SYNC":
+			print("Peer wants its db synced back")
+
+
 def controller_resp_thread():
 	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	s.bind(("", 8000))
@@ -183,7 +289,85 @@ def controller_resp_thread():
 		c.send(server_status.encode('ascii'))
 		c.close()
 		
-		
+
+def get_entire_self_db(first_index):
+	self_connection = sqlite3.connect("self_sensor_data.db", timeout=40)
+	table_command = """
+	select * from server_id_%s where entry_index >= %d;
+	""" % (server.server_id, first_index)
+	cursor = self_connection.cursor()
+	cursor.execute(table_command)
+	table = cursor.fetchall()
+	return table;
+
+def format_table_entry_into_str(entry):
+	entry_str = "BEGIN/%d/%d/%s/%s/%d/END" % (entry[0], entry[1], entry[2], entry[3], entry[4])
+	return entry_str
+
+def establish_peer_connection(peer_ip):
+	port = 5000
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	connected = False
+	while not connected:
+		try:
+			s.connect((peer_ip ,port))
+			connected = True
+		except Exception as e:
+			time.sleep(1)
+			pass
+
+	while True:
+		my_id = server.server_id
+		print("Self ID:",my_id,"Resending IDENTIFY message to peer")
+		msg = "IDENTIFY_%s" %(my_id)
+
+		s.send(str(msg).encode("ascii"))
+		data = s.recv(1024)
+		if not data:
+			print("Connection to peer severed")
+			return
+
+
+		response = data.decode("ascii")
+		print("Response from ",peer_ip, " is ", response)
+		print("Server ID:",server.server_id," sending self DB")
+		if response == "ACK":
+			table_data = get_entire_self_db(1)
+		else:
+			break
+
+		for entry in table_data:
+			entry_data = format_table_entry_into_str(entry)
+			s.sendall(entry_data.encode('ascii'))
+
+		s.send("DONE".encode("ascii"))
+
+		while True:
+			data = s.recv(1024)
+			if not data:
+				print("Connection to peer severed")
+				break
+			if data.decode('ascii') == "DONE":
+				break
+
+		time.sleep(10)
+
+
+	
+def listen_for_peer_connections():
+	host = ""
+	port = 5000
+
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.bind((host,port))
+
+	s.listen(5)
+
+	while True:
+		c, addr = s.accept()
+		print("Connected to peer: ", addr[0], ":", addr[1])
+
+		start_new_thread(receive_or_sync_peer_db, (c,))
 
 
 # There needs to be two types of tables holding sensor data
@@ -194,8 +378,16 @@ def controller_resp_thread():
 # | Entry Index | Sensor Index | Sensor Type | Sensor Data | Checksum of previous fields |
 
 def main():
-	print("In main")
+	server_list = []
+	if sys.argv[1] == "--servers":
+		server_str = sys.argv[2]
+		server_list = server_str.split(",")
 
+	# start thread that listens for peer connections
+	start_new_thread(listen_for_peer_connections, ())
+	# start thread that connects to peer servers
+	for peer_ip in server_list:
+		start_new_thread(establish_peer_connection, (peer_ip,))
 
 	# start the controller thread
 	start_new_thread(controller_resp_thread, ())
