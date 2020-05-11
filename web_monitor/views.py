@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from flask import Flask, render_template
 import sys
 import socket
@@ -39,7 +41,7 @@ class Monitor():
                     continue
                 except:
                     print("    [ERROR] Server '" + ip + "' thrown an unhandled error")
-                    monitor.servers[ip] = "Unhandled exception"
+                    monitor.servers[ip] = "Down"
                     continue
 
                 data = s.recv(1024)
